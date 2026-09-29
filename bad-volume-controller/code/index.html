@@ -3,114 +3,151 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bad Volume Controller</title>
+    <title>Doodle Blocks</title>
     <style>
-      :root { font-family: system-ui, sans-serif; color: #102a43; background: #f4fbff; }
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
-      main { width: min(90vw, 460px); text-align: center; }
-      h1 { margin-bottom: .25rem; }
-      .instructions { color: #486581; }
-      #pond {
-        width: min(78vw, 330px); aspect-ratio: 1; margin: 2rem auto 1rem;
-        position: relative; border-radius: 50%; cursor: crosshair; outline: none;
-        background: #d9f2ff; box-shadow: inset 0 0 30px #9cd9ed;
-      }
-      #pond:focus-visible { box-shadow: 0 0 0 4px #f6ad55, inset 0 0 30px #9cd9ed; }
-      .ring { position: absolute; inset: 0; margin: auto; border: 2px solid #2c7da0; border-radius: 50%; pointer-events: none; opacity: .45; }
-      .ring:nth-child(1) { width: 20%; height: 20%; }
-      .ring:nth-child(2) { width: 40%; height: 40%; }
-      .ring:nth-child(3) { width: 60%; height: 60%; }
-      .ring:nth-child(4) { width: 80%; height: 80%; }
-      .ring:nth-child(5) { width: 100%; height: 100%; }
-      #indicator { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #f28c28; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 1px 5px #6b3d0c; transition: left .15s, top .15s; }
-      #status { min-height: 1.5rem; font-weight: 700; }
-      #hint { min-height: 3rem; color: #486581; }
-      button { border: 0; border-radius: .4rem; padding: .65rem .9rem; color: white; background: #176b87; font: inherit; cursor: pointer; }
-      button:hover { background: #0f526a; }
-      kbd { padding: .1rem .3rem; border: 1px solid #9fb3c8; border-radius: .2rem; background: white; }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #fffef8; }
+      canvas { display: block; width: 100%; height: 100%; cursor: pointer; touch-action: manipulation; }
+      canvas:focus-visible { outline: 5px dashed #ff9f43; outline-offset: -12px; }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Resonance Dial</h1>
-      <p class="instructions">Where should the sound rest?</p>
-      <div id="pond" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0" tabindex="0">
-        <span class="ring"></span><span class="ring"></span><span class="ring"></span><span class="ring"></span><span class="ring"></span>
-        <span id="indicator" aria-hidden="true"></span>
-      </div>
-      <p id="status" aria-live="polite">Stillness — muted</p>
-      <p id="hint">Try the center, then a ring. You can also use <kbd>←</kbd> and <kbd>→</kbd>.</p>
-      <button id="toneButton" type="button">Start a test tone</button>
-    </main>
-
+    <canvas id="playground" tabindex="0" role="application" aria-label="Doodle block playground. Click or press Space to shake the blocks."></canvas>
     <script>
-      const pond = document.querySelector("#pond");
-      const indicator = document.querySelector("#indicator");
-      const status = document.querySelector("#status");
-      const hint = document.querySelector("#hint");
-      const toneButton = document.querySelector("#toneButton");
-      let volumeLevel = 0;
-      let audioContext, oscillator, gain;
+      const canvas = document.querySelector("#playground");
+      const ctx = canvas.getContext("2d");
+      const colors = ["#f45f68", "#f8b93b", "#72c953", "#4e9df2", "#9a76dd", "#eb70aa", "#f38a42"];
+      // One note per block: do, re, mi, fa, sol, la, ti in C major.
+      const notes = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88];
+      let width = 0, height = 0, audio, lastFrame = performance.now();
+      let blocks = [];
 
-      function updateVolume(nextLevel, previousLevel = volumeLevel) {
-        volumeLevel = Math.max(0, Math.min(5, nextLevel));
-        const percent = volumeLevel * 20;
-        pond.setAttribute("aria-valuenow", volumeLevel);
-        pond.setAttribute("aria-valuetext", volumeLevel === 0 ? "Muted" : `Ripple ${volumeLevel} of 5`);
-        status.textContent = volumeLevel === 0 ? "Stillness — muted" : `Ripple ${volumeLevel} of 5 — ${percent}% volume`;
-        gain?.gain.setTargetAtTime(volumeLevel / 5 * 0.08, audioContext.currentTime, 0.02);
-
-        // The dot makes the program's hidden state visible.
-        const distance = volumeLevel * 10;
-        indicator.style.left = `${50 + distance}%`;
-        indicator.style.top = "50%";
-
-        if (volumeLevel > previousLevel) hint.textContent = "The ripples are reaching farther.";
-        if (volumeLevel < previousLevel) hint.textContent = "Closer to stillness.";
-        if (volumeLevel === 0) hint.textContent = "Still water, silent sound.";
+      // The small offsets are deterministic, so a crayon line looks handmade but never jitters between frames.
+      function wobbleLine(x1, y1, x2, y2, color, thickness = 2) {
+        ctx.beginPath(); ctx.moveTo(x1, y1);
+        const parts = 5;
+        for (let i = 1; i <= parts; i += 1) {
+          const progress = i / parts;
+          const wobble = i === parts ? 0 : Math.sin(x1 * .071 + y1 * .043 + i * 4.7) * 1.35;
+          ctx.lineTo(x1 + (x2 - x1) * progress + wobble, y1 + (y2 - y1) * progress + wobble);
+        }
+        ctx.strokeStyle = color; ctx.lineWidth = thickness; ctx.lineCap = "round"; ctx.stroke();
+        // A soft second pass gives every outline the waxy, doubled edge of crayon.
+        ctx.globalAlpha = .36; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1, thickness * .38); ctx.stroke(); ctx.globalAlpha = 1;
       }
-
-      function chooseRing(event) {
-        const box = pond.getBoundingClientRect();
-        const x = event.clientX - box.left - box.width / 2;
-        const y = event.clientY - box.top - box.height / 2;
-        const radius = Math.sqrt(x * x + y * y);
-        // The innermost circle is a forgiving mute zone, not one exact pixel.
-        const muteZone = box.width / 10;
-        updateVolume(radius <= muteZone ? 0 : Math.ceil(radius / muteZone));
+      function tint(hex, amount) {
+        const value = Number.parseInt(hex.slice(1), 16);
+        const red = value >> 16, green = (value >> 8) & 255, blue = value & 255;
+        const target = amount > 0 ? 255 : 0, weight = Math.abs(amount);
+        const channel = input => Math.round(input + (target - input) * weight).toString(16).padStart(2, "0");
+        return `#${channel(red)}${channel(green)}${channel(blue)}`;
       }
-
-      pond.addEventListener("click", chooseRing);
-      pond.addEventListener("keydown", (event) => {
-        if (event.key === "ArrowRight" || event.key === "ArrowUp") {
-          event.preventDefault();
-          updateVolume(volumeLevel + 1);
+      function crayonTexture(points, seed, light = false) {
+        ctx.save(); ctx.beginPath(); points(); ctx.clip();
+        for (let mark = 0; mark < 15; mark += 1) {
+          const drift = (seed * 23 + mark * 17) % 94 - 15;
+          ctx.strokeStyle = mark % 2 ? (light ? "#ffffff42" : "#ffffff32") : "#3b23521e";
+          ctx.lineWidth = mark % 3 ? 1 : 1.6; ctx.beginPath(); ctx.moveTo(drift, 48); ctx.lineTo(drift + 25, -18); ctx.stroke();
         }
-        if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
-          event.preventDefault();
-          updateVolume(volumeLevel - 1);
+        ctx.restore();
+      }
+      function resize() {
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        width = innerWidth; height = innerHeight;
+        canvas.width = width * ratio; canvas.height = height * ratio;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        if (!blocks.length) resetBlocks();
+        blocks.forEach((block, index) => { block.y = Math.min(block.y, height - block.h - 14); block.x = Math.min(block.x, width - block.w - 12); block.id = index; });
+      }
+      function resetBlocks() {
+        const sizes = [72, 62, 76, 65, 74, 59, 70];
+        blocks = sizes.map((size, index) => ({
+          id: index, x: 18 + (index * 103) % Math.max(150, width - 100), y: height - 105 - (index % 2) * 22,
+          w: size, h: Math.round(size * .47), vx: 0, vy: 0, color: colors[index], hit: 0
+        }));
+      }
+      function doodleBackground() {
+        ctx.fillStyle = "#fffef8"; ctx.fillRect(0, 0, width, height);
+        ctx.save(); ctx.globalAlpha = .85;
+        // Sun, clouds, flowers, hearts, and looping crayon trails are deliberately loose and uneven.
+        const sunX = width * .13, sunY = height * .15;
+        ctx.strokeStyle = "#ffbc3e"; ctx.lineWidth = 4;
+        for (let ray = 0; ray < 11; ray += 1) { const a = ray * Math.PI * 2 / 11; wobbleLine(sunX + Math.cos(a) * 24, sunY + Math.sin(a) * 24, sunX + Math.cos(a) * 40, sunY + Math.sin(a) * 40, "#ffbc3e", 3); }
+        ctx.beginPath(); ctx.arc(sunX, sunY, 23, 0, Math.PI * 2); ctx.fillStyle = "#ffda57"; ctx.fill(); ctx.strokeStyle = "#f29e37"; ctx.stroke();
+        [[width * .73, height * .12], [width * .42, height * .24]].forEach(([x, y]) => {
+          ctx.strokeStyle = "#82cee7"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x - 12, y, 12, Math.PI, 0); ctx.arc(x + 2, y - 7, 15, Math.PI, 0); ctx.arc(x + 19, y, 11, Math.PI, 0); ctx.stroke();
+        });
+        [[width * .25, height * .38, "#f477ae"], [width * .86, height * .36, "#74c95a"], [width * .58, height * .15, "#9f7bdc"]].forEach(([x, y, color]) => {
+          ctx.strokeStyle = color; ctx.lineWidth = 3; for (let p = 0; p < 6; p += 1) { const a = p * Math.PI / 3; ctx.beginPath(); ctx.ellipse(x + Math.cos(a) * 11, y + Math.sin(a) * 11, 8, 13, a, 0, Math.PI * 2); ctx.stroke(); } ctx.fillStyle = "#ffc746"; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
+        });
+        ctx.strokeStyle = "#63c8d5"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(width * .06, height * .61); ctx.bezierCurveTo(width * .16, height * .54, width * .19, height * .71, width * .3, height * .64); ctx.bezierCurveTo(width * .4, height * .56, width * .43, height * .75, width * .54, height * .66); ctx.stroke();
+        ctx.restore();
+      }
+      function drawBlock(block) {
+        ctx.save(); ctx.translate(block.x, block.y);
+        const x = 0, y = 0, depth = 10;
+        ctx.fillStyle = "#00000014"; ctx.fillRect(x + 6, y + block.h + 8, block.w, 7);
+        ctx.fillStyle = block.color; ctx.fillRect(x, y, block.w, block.h);
+        ctx.fillStyle = tint(block.color, .32); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + depth, y - depth); ctx.lineTo(x + block.w + depth, y - depth); ctx.lineTo(x + block.w, y); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = tint(block.color, -.22); ctx.beginPath(); ctx.moveTo(x + block.w, y); ctx.lineTo(x + block.w + depth, y - depth); ctx.lineTo(x + block.w + depth, y + block.h - depth); ctx.lineTo(x + block.w, y + block.h); ctx.closePath(); ctx.fill();
+        // Each face gets fixed, layered pencil marks, not a gray shaded overlay.
+        crayonTexture(() => ctx.rect(x + 3, y + 3, block.w - 6, block.h - 6), block.id);
+        crayonTexture(() => { ctx.moveTo(x, y); ctx.lineTo(x + depth, y - depth); ctx.lineTo(x + block.w + depth, y - depth); ctx.lineTo(x + block.w, y); ctx.closePath(); }, block.id + 11, true);
+        crayonTexture(() => { ctx.moveTo(x + block.w, y); ctx.lineTo(x + block.w + depth, y - depth); ctx.lineTo(x + block.w + depth, y + block.h - depth); ctx.lineTo(x + block.w, y + block.h); ctx.closePath(); }, block.id + 21);
+        wobbleLine(x, y, x + depth, y - depth, "#375663", 2); wobbleLine(x + depth, y - depth, x + block.w + depth, y - depth, "#375663", 2); wobbleLine(x + block.w + depth, y - depth, x + block.w, y, "#375663", 2);
+        wobbleLine(x + block.w, y, x + block.w + depth, y + block.h - depth, "#375663", 2); wobbleLine(x + block.w + depth, y + block.h - depth, x + block.w, y + block.h, "#375663", 2);
+        wobbleLine(x, y, x + block.w, y, "#375663", 2); wobbleLine(x + block.w, y, x + block.w, y + block.h, "#375663", 2); wobbleLine(x + block.w, y + block.h, x, y + block.h, "#375663", 2); wobbleLine(x, y + block.h, x, y, "#375663", 2);
+        ctx.restore();
+      }
+      function makePianoNote(index, force) {
+        if (!audio || force < 1.3) return;
+        const now = audio.currentTime, master = audio.createGain(), loudness = Math.min(.18, force / 115);
+        // A few decaying harmonics make a compact, sample-free piano-like note.
+        master.gain.setValueAtTime(.001, now); master.gain.exponentialRampToValueAtTime(loudness, now + .008); master.gain.exponentialRampToValueAtTime(.001, now + .75);
+        master.connect(audio.destination);
+        [[1, 1], [2, .24], [3, .1], [4.1, .045]].forEach(([partial, level]) => {
+          const osc = audio.createOscillator(), gain = audio.createGain();
+          osc.type = "sine"; osc.frequency.setValueAtTime(notes[index] * partial, now);
+          gain.gain.setValueAtTime(level, now); gain.gain.exponentialRampToValueAtTime(.001, now + .45 / partial);
+          osc.connect(gain).connect(master); osc.start(now); osc.stop(now + .78);
+        });
+      }
+      function shake() {
+        if (!audio) audio = new AudioContext();
+        audio.resume();
+        blocks.forEach(block => { block.vx += (Math.random() - .5) * 18; block.vy -= 7 + Math.random() * 10; });
+      }
+      function physics(delta) {
+        blocks.forEach(block => {
+          block.vy += .46 * delta; block.x += block.vx * delta; block.y += block.vy * delta;
+          block.vx *= .986;
+          if (block.x < 8 || block.x + block.w > width - 8) { block.x = Math.max(8, Math.min(width - block.w - 8, block.x)); block.vx *= -.72; }
+          if (block.y + block.h > height - 12) {
+            block.y = height - block.h - 12;
+            block.vy = Math.abs(block.vy) > 2.5 ? -block.vy * .22 : 0;
+            block.vx *= .82;
+            if (Math.abs(block.vx) < .08) block.vx = 0;
+          }
+        });
+        for (let i = 0; i < blocks.length; i += 1) for (let j = i + 1; j < blocks.length; j += 1) {
+          const a = blocks[i], b = blocks[j]; const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2;
+          const dx = bx - ax, dy = by - ay, minX = (a.w + b.w) / 2, minY = (a.h + b.h) / 2;
+          if (Math.abs(dx) < minX && Math.abs(dy) < minY) {
+            const force = Math.abs(a.vx - b.vx) + Math.abs(a.vy - b.vy);
+            if (Math.abs(dx / minX) > Math.abs(dy / minY)) {
+              const push = (minX - Math.abs(dx)) / 2; a.x -= Math.sign(dx) * push; b.x += Math.sign(dx) * push;
+              const average = (a.vx + b.vx) / 2; a.vx = average - (a.vx - average) * .18; b.vx = average - (b.vx - average) * .18;
+            } else {
+              const push = (minY - Math.abs(dy)) / 2;
+              if (dy > 0) { a.y -= push * 2; a.vy = a.vy > 0 ? -a.vy * .18 : a.vy; b.y += 0; } else { b.y -= push * 2; b.vy = b.vy > 0 ? -b.vy * .18 : b.vy; }
+            }
+            if (performance.now() - a.hit > 75) { makePianoNote(a.id, force); makePianoNote(b.id, force); a.hit = b.hit = performance.now(); }
+          }
         }
-      });
-
-      toneButton.addEventListener("click", () => {
-        if (!audioContext) {
-          audioContext = new AudioContext();
-          oscillator = audioContext.createOscillator();
-          gain = audioContext.createGain();
-          oscillator.frequency.value = 220;
-          oscillator.connect(gain).connect(audioContext.destination);
-          oscillator.start();
-          toneButton.textContent = "Stop test tone";
-          updateVolume(volumeLevel);
-        } else {
-          oscillator.stop();
-          audioContext.close();
-          audioContext = oscillator = gain = null;
-          toneButton.textContent = "Start a test tone";
-        }
-      });
-
-      updateVolume(0);
+      }
+      function frame(now) { const delta = Math.min(2, (now - lastFrame) / 16.67); lastFrame = now; doodleBackground(); physics(delta); blocks.forEach(drawBlock); requestAnimationFrame(frame); }
+      canvas.addEventListener("pointerdown", shake); canvas.addEventListener("keydown", event => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); shake(); } });
+      addEventListener("resize", resize); resize(); requestAnimationFrame(frame);
     </script>
   </body>
 </html>
