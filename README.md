@@ -4,7 +4,7 @@ This repository contains a text-free, hand-drawn block playground. Seven colorfu
 
 ## Live website
 
-Play the game at [Doodle Blocks](https://doodle-blocks.savory-buddy-3516.chatgpt.site).
+Play the game at [Doodle Blocks](https://doodle-blocks.zy2804.chatgpt.site).
 
 ## Project idea
 
