@@ -2,6 +2,10 @@
 
 This repository contains a text-free, hand-drawn block playground. Seven colorful toy blocks scatter and knock together when the page is clicked or tapped.
 
+## Live website
+
+Play the game at [Doodle Blocks](https://doodle-blocks.savory-buddy-3516.chatgpt.site).
+
 ## Project idea
 
 Doodle Blocks is an open-ended, childlike digital toy rather than a game with a score or ending. The original idea was a different version of **Water Ring Toss Game**: replace the ring with seven colorful toy bricks and let the player stir water to build a high tower. The final version reimagines that idea as a small underwater world where clicking anywhere shakes seven floating blocks. The goal is simply to explore their movement, listen to their collisions, and optionally guide them into a loose tower.
